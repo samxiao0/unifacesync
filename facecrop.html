@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Crop Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f0f; color: #eee; font-family: sans-serif; min-height: 100vh; padding: 20px; }
+
+    /* Loading screen */
+    #loading-screen {
+      position: fixed; inset: 0; background: #0f0f0f;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 100; gap: 20px;
+    }
+    .ring {
+      width: 56px; height: 56px;
+      border: 4px solid #222; border-top-color: #00d4ff;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #load-text { color: #00d4ff; font-size: 14px; text-align: center; }
+    #load-err { color: #ff5555; font-size: 13px; text-align: center; max-width: 300px; padding: 0 20px; display: none; }
+
+    /* App */
+    #app { display: none; max-width: 1200px; margin: 0 auto; }
+    header { background: #1a1a2e; padding: 16px 20px; border-radius: 10px; border-bottom: 2px solid #00d4ff; margin-bottom: 20px; }
+    header h1 { color: #00d4ff; font-size: 20px; letter-spacing: 1px; }
+
+    .section { background: #1a1a1a; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #252525; }
+    .section h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; }
+
+    .upload-zone {
+      border: 2px dashed #333; border-radius: 12px; padding: 40px 20px; text-align: center;
+      cursor: pointer; transition: all .2s; background: #111;
+    }
+    .upload-zone:hover { border-color: #00d4ff; }
+    .upload-zone.filled { border-color: #00cc55; padding: 15px; }
+    .upload-zone .icon { font-size: 40px; margin-bottom: 10px; }
+    .upload-zone p { color: #777; font-size: 13px; line-height: 1.6; }
+    .upload-zone .file-count { color: #00d4ff; font-weight: bold; margin-top: 8px; }
+
+    .btn {
+      padding: 12px 20px; border: none; border-radius: 8px; font-size: 14px;
+      font-weight: bold; cursor: pointer; transition: all .2s; margin: 4px 2px;
+    }
+    .btn-blue { background: #00d4ff; color: #000; }
+    .btn-blue:hover { box-shadow: 0 0 18px rgba(0,212,255,.35); }
+    .btn-blue:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-grey { background: transparent; border: 1px solid #333; color: #888; }
+    .btn-grey:hover { border-color: #555; color: #aaa; }
+    .btn-red { background: #cc3333; color: #fff; }
+    .btn-red:hover { background: #dd4444; }
+
+    .button-group {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+    }
+
+    .progress-bar {
+      width: 100%; background: #222; border-radius: 8px; height: 6px; margin-top: 10px; overflow: hidden;
+    }
+    .progress-fill { background: #00d4ff; height: 100%; width: 0%; transition: width .3s; }
+
+    .status { color: #888; font-size: 12px; margin-top: 10px; }
+    .status.info { color: #00d4ff; }
+    .status.success { color: #00cc55; }
+    .status.error { color: #ff5555; }
+
+    /* Gallery */
+    .gallery {
+      display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      margin-top: 15px;
+    }
+    .crop-item { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid #333; }
+    .crop-item img { width: 100%; display: block; background: #222; }
+    .crop-item .info { background: #111; padding: 6px; font-size: 10px; color: #888; text-align: center; }
+    .crop-item .actions { position: absolute; top: 0; right: 0; gap: 4px; display: flex; background: rgba(0,0,0,.7); padding: 4px; border-radius: 0 6px 0 6px; opacity: 0; transition: opacity .2s; }
+    .crop-item:hover .actions { opacity: 1; }
+    .crop-item .actions button { padding: 3px 6px; font-size: 10px; }
+
+    .pagination {
+      display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 20px;
+    }
+    .pagination button { padding: 6px 12px; border: 1px solid #333; background: #1a1a1a; color: #aaa; border-radius: 6px; cursor: pointer; }
+    .pagination button:hover { border-color: #00d4ff; color: #00d4ff; }
+    .pagination button:disabled { opacity: .3; cursor: not-allowed; }
+    .pagination span { color: #777; font-size: 12px; }
+
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 15px;
+    }
+    .stat-card {
+      background: #111; border: 1px solid #252525; border-radius: 8px; padding: 12px; text-align: center;
+    }
+    .stat-card .value { font-size: 28px; font-weight: bold; color: #00d4ff; }
+    .stat-card .label { font-size: 11px; color: #888; margin-top: 4px; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="ring"></div>
+  <div id="load-text">Loading face detection models...</div>
+  <div id="load-err"></div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <header>
+    <h1>🎯 Face Crop Tool</h1>
+  </header>
+
+  <!-- Upload Section -->
+  <div class="section">
+    <h2>📤 Upload Photos</h2>
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept="image/*" multiple class="hidden" onchange="onFilesSelected(event)">
+      <div class="icon">📷</div>
+      <p>Tap to upload one or more photos<br>iPhone & Android supported</p>
+      <div class="file-count hidden" id="file-count"></div>
+    </div>
+    <div class="button-group">
+      <button class="btn btn-blue" id="process-btn" onclick="processPhotos()" disabled>🚀 Detect & Crop Faces</button>
+      <button class="btn btn-grey" onclick="resetAll()">Clear All</button>
+    </div>
+  </div>
+
+  <!-- Status Section -->
+  <div class="section hidden" id="status-section">
+    <h2>⏳ Processing</h2>
+    <div id="status-text" class="status info"></div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- Results Section -->
+  <div class="section hidden" id="results-section">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h2>✂️ Cropped Faces</h2>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-blue" id="download-all-btn" onclick="downloadAllCrops()">⬇️ Download All</button>
+        <button class="btn btn-blue" id="send-to-identify-btn" onclick="sendToIdentify()" title="Send cropped faces to identify queue">📤 Send to Identify</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="value" id="total-photos">0</div>
+        <div class="label">Photos processed</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="total-faces">0</div>
+        <div class="label">Faces detected</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="detection-time">0s</div>
+        <div class="label">Total time</div>
+      </div>
+    </div>
+
+    <!-- Gallery -->
+    <div id="gallery" class="gallery"></div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination" style="display: none;">
+      <button id="prev-btn" onclick="previousPage()">← Previous</button>
+      <span id="page-info"></span>
+      <button id="next-btn" onclick="nextPage()">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+const CROP_PADDING = 0.2; // 20% padding around face
+const CROPS_PER_PAGE = 30;
+
+let selectedFiles = [];
+let allCrops = []; // { original, processed, label, photoIndex, faceIndex, faceCount }
+let currentPage = 0;
+let cropViews = {}; // track which crops are showing original (true) or enhanced (false)
+
+// ── Load Models ──────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    setLoadText('Loading face detector...');
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+    setLoadText('Loading landmark model...');
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    setLoadText('Ready ✓');
+    await new Promise(r => setTimeout(r, 400));
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+  } catch (e) {
+    setLoadText('');
+    const err = document.getElementById('load-err');
+    err.textContent = 'Model load failed: ' + e.message + '\n\nMake sure you have internet connection.';
+    err.style.display = 'block';
+    console.error(e);
+  }
+}
+
+function setLoadText(t) {
+  document.getElementById('load-text').textContent = t;
+}
+
+// ── File Handling ────────────────────────────────────────────────────────────
+function onFilesSelected(event) {
+  selectedFiles = Array.from(event.target.files || []);
+  if (!selectedFiles.length) return;
+
+  const countEl = document.getElementById('file-count');
+  countEl.textContent = selectedFiles.length + ' photo' + (selectedFiles.length > 1 ? 's' : '') + ' selected';
+  countEl.classList.remove('hidden');
+  document.getElementById('upload-zone').classList.add('filled');
+  document.getElementById('process-btn').disabled = false;
+}
+
+// ── Face Cropping ────────────────────────────────────────────────────────────
+async function processPhotos() {
+  if (!selectedFiles.length) return;
+
+  allCrops = [];
+  currentPage = 0;
+  const startTime = Date.now();
+
+  document.getElementById('status-section').classList.remove('hidden');
+  document.getElementById('results-section').classList.add('hidden');
+  document.getElementById('process-btn').disabled = true;
+
+  let totalFaces = 0;
+
+  for (let i = 0; i < selectedFiles.length; i++) {
+    const file = selectedFiles[i];
+    updateStatus(`Processing photo ${i + 1} of ${selectedFiles.length}: ${file.name}`);
+    updateProgress((i / selectedFiles.length) * 100);
+
+    try {
+      const img = await loadImage(file);
+      const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }));
+
+      if (detections.length) {
+        // Crop each detected face
+        for (let j = 0; j < detections.length; j++) {
+          const box = detections[j].box;
+          const crop = cropFace(img, box, file.name, i, j, detections.length);
+          allCrops.push(crop);
+          totalFaces++;
+        }
+      }
+    } catch (e) {
+      console.error('Error processing', file.name, e);
+      updateStatus(`Error processing ${file.name}`, 'error');
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  updateProgress(100);
+  updateStatus(`✓ Done! Detected ${totalFaces} faces in ${selectedFiles.length} photo(s)`, 'success');
+
+  // Show results
+  setTimeout(() => {
+    document.getElementById('status-section').classList.add('hidden');
+    document.getElementById('results-section').classList.remove('hidden');
+    document.getElementById('total-photos').textContent = selectedFiles.length;
+    document.getElementById('total-faces').textContent = totalFaces;
+    document.getElementById('detection-time').textContent = elapsed + 's';
+    renderGallery();
+    document.getElementById('process-btn').disabled = false;
+  }, 500);
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Image Enhancement Functions ────────────────────────────────────────────
+function enhanceImage(src, brightness = 1.1, contrast = 1.3) {
+  const cvs = document.createElement('canvas');
+  cvs.width = src.width; cvs.height = src.height;
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+  
+  try {
+    // Brightness + contrast adjustment
+    const img = ctx.getImageData(0, 0, cvs.width, cvs.height);
+    const data = img.data;
+    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+    
+    for (let i = 0; i < data.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        let v = data[i + c] * brightness;
+        v = factor * (v - 128) + 128;
+        data[i + c] = Math.max(0, Math.min(255, v));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) { console.warn('enhance failed', e); }
+  
+  // Apply strong unsharp mask for sharpening
+  try {
+    applyUnsharpMask(ctx, cvs.width, cvs.height, 2.0, 1.0, 0.5);
+  } catch (e) { console.warn('sharpen failed', e); }
+  
+  return cvs;
+}
+
+// Unsharp mask: high-pass sharpening technique
+function applyUnsharpMask(ctx, w, h, radius = 2.0, strength = 1.2, threshold = 0) {
+  try {
+    const img = ctx.getImageData(0, 0, w, h);
+    const original = img.data.slice();
+    
+    // Create blurred version
+    const blurred = new Uint8ClampedArray(original.length);
+    const r = Math.round(radius);
+    const r2 = r * 2 + 1;
+    
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        for (let c = 0; c < 3; c++) {
+          let sum = 0, count = 0;
+          for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+              const ny = Math.max(0, Math.min(h - 1, y + dy));
+              const nx = Math.max(0, Math.min(w - 1, x + dx));
+              const idx = (ny * w + nx) * 4 + c;
+              sum += original[idx];
+              count++;
+            }
+          }
+          const idx = (y * w + x) * 4 + c;
+          blurred[idx] = sum / count;
+        }
+      }
+    }
+    
+    // Apply unsharp mask: original + strength * (original - blurred)
+    for (let i = 0; i < original.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const diff = original[i + c] - blurred[i + c];
+        if (Math.abs(diff) > threshold) {
+          let sharpened = original[i + c] + strength * diff;
+          img.data[i + c] = Math.max(0, Math.min(255, sharpened));
+        } else {
+          img.data[i + c] = original[i + c];
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) { console.warn('unsharp mask failed', e); }
+}
+
+function contrastStretch(ctx, w, h) {
+  try {
+    const img = ctx.getImageData(0, 0, w, h);
+    const data = img.data;
+    const min = [255, 255, 255], max = [0, 0, 0];
+    for (let i = 0; i < data.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const v = data[i + c];
+        if (v < min[c]) min[c] = v;
+        if (v > max[c]) max[c] = v;
+      }
+    }
+    for (let i = 0; i < data.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const v = data[i + c];
+        const mn = min[c], mx = max[c];
+        if (mx > mn) data[i + c] = Math.max(0, Math.min(255, Math.round((v - mn) * 255 / (mx - mn))));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) { console.warn('contrast stretch failed', e); }
+}
+
+function cropFace(sourceImg, box, photoName, photoIdx, faceIdx, faceCount) {
+  const { x, y, width, height } = box;
+  const padding = Math.min(width, height) * CROP_PADDING;
+
+  const cropX = Math.max(0, x - padding);
+  const cropY = Math.max(0, y - padding);
+  const cropW = Math.min(sourceImg.width - cropX, width + padding * 2);
+  const cropH = Math.min(sourceImg.height - cropY, height + padding * 2);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cropW;
+  canvas.height = cropH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+  // Apply enhancement: contrast stretch + brightness/contrast boost
+  contrastStretch(ctx, cropW, cropH);
+  const enhanced = enhanceImage(canvas, 1.1, 1.3);
+
+  const label = `${photoName.replace(/\.[^.]+$/, '')}_Face${faceIdx + 1}`;
+  return {
+    original: canvas,
+    processed: enhanced,
+    label: label,
+    photoIndex: photoIdx,
+    faceIndex: faceIdx,
+    faceCount: faceCount
+  };
+}
+
+// ── Gallery Rendering ────────────────────────────────────────────────────────
+function renderGallery() {
+  const gallery = document.getElementById('gallery');
+  gallery.innerHTML = '';
+
+  if (!allCrops.length) {
+    gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #666; padding: 40px;">No faces detected. Try uploading clearer photos.</div>';
+    document.getElementById('pagination').style.display = 'none';
+    return;
+  }
+
+  const start = currentPage * CROPS_PER_PAGE;
+  const end = start + CROPS_PER_PAGE;
+  const pageCrops = allCrops.slice(start, end);
+
+  pageCrops.forEach((crop, idx) => {
+    const globalIdx = start + idx;
+    const item = document.createElement('div');
+    item.className = 'crop-item';
+    item.style.position = 'relative';
+
+    const img = document.createElement('img');
+    img.src = crop.processed.toDataURL('image/jpeg', 0.9);
+    img.id = `crop-${globalIdx}`;
+    img.style.cursor = 'pointer';
+    img.title = 'Click to toggle original/enhanced';
+    img.onclick = () => toggleCropView(globalIdx);
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    info.textContent = crop.label + ' (Enhanced)';
+    info.id = `info-${globalIdx}`;
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'btn btn-blue';
+    dlBtn.textContent = '⬇️';
+    dlBtn.onclick = () => downloadCrop(globalIdx);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn btn-grey';
+    copyBtn.textContent = '📋';
+    copyBtn.onclick = () => copyCropToClipboard(globalIdx);
+
+    actions.appendChild(dlBtn);
+    actions.appendChild(copyBtn);
+
+    item.appendChild(img);
+    item.appendChild(info);
+    item.appendChild(actions);
+    gallery.appendChild(item);
+  });
+
+  updatePagination();
+}
+
+// Toggle between original and enhanced view
+function toggleCropView(index) {
+  cropViews[index] = !cropViews[index]; // toggle
+  const crop = allCrops[index];
+  const imgEl = document.getElementById(`crop-${index}`);
+  const infoEl = document.getElementById(`info-${index}`);
+  
+  if (cropViews[index]) {
+    // Show original
+    imgEl.src = crop.original.toDataURL('image/jpeg', 0.9);
+    infoEl.textContent = crop.label + ' (Original)';
+  } else {
+    // Show enhanced
+    imgEl.src = crop.processed.toDataURL('image/jpeg', 0.9);
+    infoEl.textContent = crop.label + ' (Enhanced)';
+  }
+}
+
+function updatePagination() {
+  const totalPages = Math.ceil(allCrops.length / CROPS_PER_PAGE);
+  if (totalPages <= 1) {
+    document.getElementById('pagination').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('pagination').style.display = 'flex';
+  document.getElementById('page-info').textContent = `Page ${currentPage + 1} of ${totalPages}`;
+  document.getElementById('prev-btn').disabled = currentPage === 0;
+  document.getElementById('next-btn').disabled = currentPage >= totalPages - 1;
+}
+
+function previousPage() {
+  if (currentPage > 0) {
+    currentPage--;
+    renderGallery();
+    document.querySelector('.gallery').scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function nextPage() {
+  const totalPages = Math.ceil(allCrops.length / CROPS_PER_PAGE);
+  if (currentPage < totalPages - 1) {
+    currentPage++;
+    renderGallery();
+    document.querySelector('.gallery').scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+// ── Download ─────────────────────────────────────────────────────────────────
+async function downloadCrop(index) {
+  const crop = allCrops[index];
+  const canvas = cropViews[index] ? crop.original : crop.processed;
+  const link = document.createElement('a');
+  link.href = canvas.toDataURL('image/jpeg', 0.95);
+  link.download = crop.label + (cropViews[index] ? '_original' : '_enhanced') + '.jpg';
+  link.click();
+}
+
+async function copyCropToClipboard(index) {
+  const crop = allCrops[index];
+  const canvas = cropViews[index] ? crop.original : crop.processed;
+  canvas.toBlob(blob => {
+    navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob })
+    ]).then(() => {
+      alert('✓ Copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy:', err);
+    });
+  });
+}
+
+async function downloadAllCrops() {
+  if (!allCrops.length) return;
+
+  if (confirm(`Download ${allCrops.length} cropped faces (enhanced version)?`)) {
+    for (let i = 0; i < allCrops.length; i++) {
+      const crop = allCrops[i];
+      const canvas = crop.processed; // always use enhanced for batch
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg', 0.95);
+      link.download = crop.label + '_enhanced.jpg';
+      
+      await new Promise(resolve => {
+        setTimeout(() => {
+          link.click();
+          resolve();
+        }, 100 * (i % 5));
+      });
+    }
+  }
+}
+
+// ── UI Helpers ───────────────────────────────────────────────────────────────
+function updateStatus(msg, type = 'info') {
+  const el = document.getElementById('status-text');
+  el.textContent = msg;
+  el.className = 'status ' + type;
+}
+
+function updateProgress(percent) {
+  document.getElementById('progress-fill').style.width = percent + '%';
+}
+
+function resetAll() {
+  selectedFiles = [];
+  allCrops = [];
+  currentPage = 0;
+  cropViews = {};
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-count').classList.add('hidden');
+  document.getElementById('file-count').textContent = '';
+  document.getElementById('upload-zone').classList.remove('filled');
+  document.getElementById('process-btn').disabled = true;
+  document.getElementById('status-section').classList.add('hidden');
+  document.getElementById('results-section').classList.add('hidden');
+}
+
+// ── Bridge to Identify ────────────────────────────────────────────────────────
+function sendToIdentify() {
+  if (!allCrops.length) { alert('No cropped faces to send'); return; }
+  
+  try {
+    let queue = [];
+    allCrops.forEach((crop, idx) => {
+      const b64 = crop.processed.toDataURL('image/jpeg', 0.95);
+      queue.push({
+        b64: b64,
+        label: crop.label
+      });
+    });
+    
+    // Store queue in localStorage
+    const existing = JSON.parse(localStorage.getItem('identify_queue') || '[]');
+    const merged = existing.concat(queue);
+    localStorage.setItem('identify_queue', JSON.stringify(merged));
+    
+    alert(`✓ Sent ${allCrops.length} cropped faces to identify queue!\n\nGo to index.html and click "🚀 Batch Identify" to process them.`);
+  } catch (e) {
+    alert('Error sending to identify: ' + e.message);
+    console.error(e);
+  }
+}
+
+// Start
+window.addEventListener('load', loadModels);
+</script>
+</body>
+</html>

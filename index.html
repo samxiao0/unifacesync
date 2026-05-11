@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Match</title>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f0f; color: #eee; font-family: sans-serif; min-height: 100vh; }
+
+  /* Loading screen */
+  #loading-screen {
+    position: fixed; inset: 0; background: #0f0f0f;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; gap: 20px;
+  }
+  .ring {
+    width: 56px; height: 56px;
+    border: 4px solid #222; border-top-color: #00d4ff;
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #load-text { color: #00d4ff; font-size: 14px; text-align: center; }
+  #load-err { color: #ff5555; font-size: 13px; text-align: center; max-width: 300px; padding: 0 20px; display: none; }
+
+  /* App */
+  #app { display: none; }
+  header { background: #1a1a2e; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #00d4ff; }
+  header h1 { color: #00d4ff; font-size: 17px; letter-spacing: 1px; }
+  #count { background: #00d4ff; color: #000; padding: 3px 11px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+
+  .tabs { display: flex; background: #1a1a1a; }
+  .tab { flex: 1; padding: 13px 8px; text-align: center; cursor: pointer; color: #777; font-size: 13px; border-bottom: 3px solid transparent; transition: all .2s; }
+  .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; background: #111; }
+
+  .page { display: none; padding: 18px 16px; max-width: 480px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  label { display: block; color: #aaa; font-size: 12px; margin-bottom: 5px; margin-top: 13px; letter-spacing: .5px; }
+  input[type=text] { width: 100%; background: #222; border: 1px solid #333; border-radius: 8px; padding: 11px 13px; color: #eee; font-size: 15px; outline: none; }
+  input[type=text]:focus { border-color: #00d4ff; }
+
+  /* Photo strip */
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; min-height: 70px; }
+  .strip img { width: 68px; height: 68px; object-fit: cover; border-radius: 8px; border: 2px solid #00d4ff; cursor: pointer; }
+  .add-slot { width: 68px; height: 68px; border-radius: 8px; border: 2px dashed #444; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 22px; color: #555; cursor: pointer; background: #1a1a1a; flex-shrink: 0; }
+  .add-slot:hover { border-color: #00d4ff; color: #00d4ff; }
+  .add-slot span { font-size: 9px; color: #555; margin-top: 2px; }
+
+  /* Upload zone */
+  .upload-zone { border: 2px dashed #333; border-radius: 12px; padding: 28px 18px; text-align: center; cursor: pointer; margin: 13px 0; transition: all .2s; background: #1a1a1a; }
+  .upload-zone:hover { border-color: #00d4ff; }
+  .upload-zone.filled { padding: 0; border-color: #00d4ff; }
+  .upload-zone img { width: 100%; max-height: 250px; object-fit: contain; border-radius: 10px; display: block; }
+  .upload-zone .icon { font-size: 34px; margin-bottom: 8px; }
+  .upload-zone p { color: #777; font-size: 13px; line-height: 1.6; }
+  .query-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
+  .query-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #333; }
+  .query-count { margin-top: 8px; color: #777; font-size: 12px; text-align: center; }
+
+  /* Buttons */
+  .btn { width: 100%; padding: 13px; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: all .2s; }
+  .btn-blue { background: #00d4ff; color: #000; }
+  .btn-blue:hover { box-shadow: 0 0 18px rgba(0,212,255,.35); }
+  .btn-blue:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+  .btn-grey { background: transparent; border: 1px solid #333; color: #888; }
+  .btn-grey:hover { border-color: #555; color: #aaa; }
+
+  /* Result */
+  .result { border-radius: 12px; padding: 22px 18px; margin-top: 16px; text-align: center; animation: pop .3s ease; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .result.match { background: #0b2a17; border: 2px solid #00cc55; }
+  .result.nomatch { background: #2a0b0b; border: 2px solid #cc3333; }
+  .result .ico { font-size: 46px; margin-bottom: 8px; }
+  .result h2 { font-size: 18px; margin-bottom: 8px; }
+  .result.match h2 { color: #00cc55; }
+  .result.nomatch h2 { color: #cc3333; }
+  .result .rname { font-size: 22px; font-weight: bold; color: #fff; }
+  .result .rroll { font-size: 15px; color: #00d4ff; margin-top: 4px; }
+  .result .rscore { font-size: 30px; font-weight: bold; color: #00cc55; margin-top: 10px; }
+  .result .rscore span { display: block; font-size: 12px; color: #777; font-weight: normal; }
+  .result .rnomatch { color: #aaa; font-size: 14px; margin-top: 6px; }
+  .result .rclosest { color: #555; font-size: 12px; margin-top: 6px; }
+
+  /* Progress */
+  .progress { background: #1a1a1a; border-radius: 8px; padding: 12px 16px; margin-top: 12px; font-size: 13px; color: #888; text-align: center; }
+  .progress b { color: #00d4ff; }
+
+  /* DB cards */
+  .person-card { background: #1a1a1a; border: 1px solid #252525; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
+  .person-card img { width: 48px; height: 48px; border-radius: 7px; object-fit: cover; flex-shrink: 0; }
+  .pinfo .pname { font-size: 14px; font-weight: bold; }
+  .pinfo .proll { font-size: 12px; color: #888; margin-top: 2px; }
+  .pinfo .pphotos { font-size: 11px; color: #444; margin-top: 2px; }
+  .del { margin-left: auto; background: none; border: 1px solid #3a1111; color: #cc4444; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px; flex-shrink: 0; }
+  .del:hover { background: #1a0808; }
+  .empty { text-align: center; padding: 40px 20px; color: #444; font-size: 14px; }
+
+  .note { background: #161a20; border-left: 3px solid #00d4ff; border-radius: 6px; padding: 10px 13px; font-size: 12px; color: #778; line-height: 1.6; margin: 10px 0; }
+  .note b { color: #00d4ff; }
+
+  .mode-btn { flex:1; padding:9px; border-radius:8px; border:1px solid #333; background:#1a1a1a; color:#888; font-size:13px; cursor:pointer; transition:all .2s; }
+  .mode-btn.active { background:#00d4ff22; border-color:#00d4ff; color:#00d4ff; font-weight:bold; }
+
+  /* Bulk table */
+  .bulk-row { background:#1a1a1a; border:1px solid #252525; border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px; }
+  .bulk-row.done { border-color:#00cc5544; background:#0b1a10; }
+  .bulk-row.error { border-color:#cc333344; background:#1a0b0b; }
+  .bulk-info { flex:1; min-width:0; }
+  .bulk-name { font-size:13px; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bulk-roll { font-size:11px; color:#888; margin-top:2px; }
+  .bulk-status { font-size:11px; margin-top:3px; }
+  .bulk-status.ok { color:#00cc55; }
+  .bulk-status.err { color:#cc3333; }
+  .bulk-status.pending { color:#888; }
+  .bulk-thumb { width:44px; height:44px; border-radius:6px; object-fit:cover; border:1px solid #333; flex-shrink:0; }
+  .bulk-add { width:44px; height:44px; border-radius:6px; border:2px dashed #333; background:#111; display:flex; align-items:center; justify-content:center; font-size:18px; color:#555; cursor:pointer; flex-shrink:0; }
+  .bulk-add:hover { border-color:#00d4ff; color:#00d4ff; }
+  .bulk-summary { background:#161a20; border-radius:8px; padding:10px 13px; font-size:13px; color:#aaa; margin-bottom:10px; text-align:center; }
+  .bulk-summary b { color:#00d4ff; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="ring"></div>
+  <div id="load-text">Loading MobileFaceNet model...</div>
+  <div id="load-err"></div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <header>
+    <h1>🔍 Face Match</h1>
+    <span id="count">0 People</span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" onclick="goTo('register')">➕ Register</div>
+    <div class="tab" onclick="goTo('identify')">🔍 Identify</div>
+    <div class="tab" onclick="goTo('database')">📋 Database</div>
+  </div>
+
+  <!-- REGISTER -->
+  <div id="page-register" class="page active">
+
+    <!-- Mode toggle -->
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="mode-btn active" id="mode-single" onclick="setMode('single')">👤 Single</button>
+      <button class="mode-btn" id="mode-bulk" onclick="setMode('bulk')">📋 Bulk CSV</button>
+    </div>
+
+    <!-- SINGLE MODE -->
+    <div id="single-mode">
+      <div class="note"><b>How to register:</b> Enter name &amp; roll number, tap + to add 1–5 face photos, then tap Register.</div>
+
+      <label>Full Name</label>
+      <input type="text" id="r-name" placeholder="e.g. Ahmed Khan">
+
+      <label>Roll Number</label>
+      <input type="text" id="r-roll" placeholder="e.g. CS-001">
+
+      <label>Photos (tap + to add, tap photo to remove)</label>
+      <div class="strip" id="strip"></div>
+      <input type="file" id="photo-file" accept="image/*" class="hidden" onchange="onPhotoFile(event)">
+
+      <button class="btn btn-blue" id="reg-btn" onclick="doRegister()">✓ Register Person</button>
+      <button class="btn btn-grey" onclick="clearReg()">Clear</button>
+    </div>
+
+    <!-- BULK MODE -->
+    <div id="bulk-mode" class="hidden">
+      <div class="note">
+        <b>Select multiple photos at once.</b> Fill in the name &amp; roll for each, then tap Register All.<br>
+        <b>Tip:</b> Name your photos as <b>Name_Roll.jpg</b> (e.g. Ahmed_CS001.jpg) to auto-fill the fields.
+      </div>
+
+      <div class="upload-zone" id="bulk-zone" onclick="document.getElementById('bulk-photos-input').click()">
+        <input type="file" id="bulk-photos-input" accept="image/*" multiple class="hidden" onchange="onBulkPhotos(event)">
+        <div class="icon">📷</div>
+        <p>Tap to select multiple photos<br>iPhone &amp; Android supported</p>
+      </div>
+
+      <div id="bulk-table"></div>
+      <button class="btn btn-blue hidden" id="bulk-reg-btn" onclick="doBulkRegister()">✓ Register All</button>
+      <button class="btn btn-grey hidden" id="bulk-clear-btn" onclick="clearBulk()">Clear All</button>
+    </div>
+  </div>
+
+  <!-- IDENTIFY -->
+  <div id="page-identify" class="page">
+    <div class="note"><b>How to identify:</b> Upload a photo and tap Find Match. MobileFaceNet compares it against all registered faces locally — no internet needed.</div>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="mode-btn active" id="id-mode-single" onclick="setIdentifyMode('single')">1 Photo</button>
+      <button class="mode-btn" id="id-mode-multi" onclick="setIdentifyMode('multi')">Multiple Photos</button>
+    </div>
+
+    <!-- Queue Info -->
+    <div id="queue-info" class="note hidden" style="border-left-color: #00cc55; color: #00cc55;">
+      📋 <b id="queue-count">0</b> crops in queue from Face Crop Tool
+      <button class="btn btn-blue" style="width: auto; padding: 4px 12px; font-size: 12px; margin-top: 6px;" onclick="startBatchIdentify()">🚀 Batch Identify</button>
+      <button class="btn btn-grey" style="width: auto; padding: 4px 12px; font-size: 12px; margin-top: 6px;" onclick="clearQueue()">Clear Queue</button>
+    </div>
+
+    <label>Upload photo to identify</label>
+    <div class="upload-zone" id="uzone" onclick="document.getElementById('ufile').click()">
+      <input type="file" id="ufile" accept="image/*" class="hidden" onchange="onQueryFile(event)">
+      <div id="upholder">
+        <div class="icon">📷</div>
+        <p>Tap to take or upload a photo<br>iPhone &amp; Android supported</p>
+      </div>
+      <img id="uimg" class="hidden" alt="">
+      <div id="query-strip" class="query-strip hidden"></div>
+      <div id="query-count" class="query-count hidden"></div>
+    </div>
+
+    <button class="btn btn-blue" id="id-btn" onclick="doIdentify()" disabled>🔍 Find Match</button>
+    <button class="btn btn-grey" onclick="clearIdentify()">Clear</button>
+    <div id="id-progress" class="hidden"></div>
+    <div id="id-result"></div>
+
+    <!-- Batch Results -->
+    <div id="batch-results" class="hidden" style="margin-top: 20px;">
+      <h2 style="color: #00d4ff; margin-bottom: 12px;">📊 Batch Results</h2>
+      <div id="batch-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;">
+        <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 24px; font-weight: bold; color: #00d4ff;" id="batch-total">0</div>
+          <div style="font-size: 11px; color: #888; margin-top: 4px;">Total Processed</div>
+        </div>
+        <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 24px; font-weight: bold; color: #00cc55;" id="batch-matched">0</div>
+          <div style="font-size: 11px; color: #888; margin-top: 4px;">Matched</div>
+        </div>
+        <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 24px; font-weight: bold; color: #ff5555;" id="batch-no-match">0</div>
+          <div style="font-size: 11px; color: #888; margin-top: 4px;">No Match</div>
+        </div>
+      </div>
+      <div id="batch-results-list" style="max-height: 400px; overflow-y: auto;"></div>
+    </div>
+  </div>
+
+  <!-- DATABASE -->
+  <div id="page-database" class="page">
+    <div id="db-list"></div>
+  </div>
+</div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+var MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+var MATCH_THRESHOLD = 0.50; // euclidean distance — lower = stricter (relaxed to catch real matches)
+var MIN_GAP = 0.08; // minimum gap between best and 2nd best to confirm match (relaxed)
+
+// ── State ────────────────────────────────────────────────────────────────────
+var people = []; // { id, name, roll, photos: [b64], descriptors: [[float]] }
+var regPhotos = [];
+var identifyMode = 'single';
+var queryPhotos = []; // [{ b64, name }]
+
+try { people = JSON.parse(localStorage.getItem('mfn_people') || '[]'); } catch(e) {}
+refreshCount();
+computeCentroids();
+
+// ── Load Models ──────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    setLoadText('Loading face detector...');
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+    setLoadText('Loading landmark model...');
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    setLoadText('Loading MobileFaceNet embeddings...');
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+    setLoadText('Ready ✓');
+    await new Promise(function(r){ setTimeout(r, 400); });
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    renderStrip();
+  } catch(e) {
+    setLoadText('');
+    var err = document.getElementById('load-err');
+    err.textContent = 'Model load failed: ' + e.message + '\n\nMake sure you have internet connection and try reloading.';
+    err.style.display = 'block';
+    console.error(e);
+  }
+}
+
+function setLoadText(t) { document.getElementById('load-text').textContent = t; }
+
+function b64ToImg(b64) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.onload = function() { resolve(img); };
+    img.onerror = reject;
+    img.src = b64;
+  });
+}
+
+// ── Get face descriptor from image element ───────────────────────────────────
+async function getDescriptor(imgEl) {
+  // Preprocess + augmentation: align, equalize luminance, gamma variants and flip
+  var variants = [];
+  try {
+    var base = await preprocessImage(imgEl);
+    variants.push(base);
+
+    // gamma corrected slightly darker and lighter
+    var g1 = applyGamma(base, 0.9);
+    var g2 = applyGamma(base, 1.1);
+    variants.push(g1);
+    variants.push(g2);
+
+    // horizontal flip
+    var f = flipCanvas(base);
+    variants.push(f);
+  } catch (e) {
+    variants = [imgEl];
+  }
+
+  var descriptors = [];
+  for (var v = 0; v < variants.length; v++) {
+    try {
+      var det = await faceapi
+        .detectSingleFace(variants[v], new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+      if (det && det.descriptor) descriptors.push(det.descriptor);
+    } catch (e) { console.warn('descriptor variant failed', e); }
+  }
+
+  if (!descriptors.length) return null;
+
+  // Average descriptors element-wise
+  var dim = descriptors[0].length;
+  var avg = new Float32Array(dim);
+  for (var i = 0; i < descriptors.length; i++) {
+    var d = descriptors[i];
+    for (var j = 0; j < dim; j++) avg[j] += d[j];
+  }
+  for (var k = 0; k < dim; k++) avg[k] /= descriptors.length;
+  return avg;
+}
+
+// Apply gamma correction on a canvas/image and return a canvas
+function applyGamma(src, gamma) {
+  var cvs = document.createElement('canvas');
+  cvs.width = src.width; cvs.height = src.height;
+  var ctx = cvs.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+  try {
+    var img = ctx.getImageData(0, 0, cvs.width, cvs.height);
+    var data = img.data;
+    var inv = 1 / gamma;
+    for (var i = 0; i < data.length; i += 4) {
+      for (var c = 0; c < 3; c++) {
+        data[i + c] = Math.pow(data[i + c] / 255, inv) * 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) { console.warn('gamma failed', e); }
+  return cvs;
+}
+
+// Flip canvas horizontally
+function flipCanvas(src) {
+  var cvs = document.createElement('canvas');
+  cvs.width = src.width; cvs.height = src.height;
+  var ctx = cvs.getContext('2d');
+  ctx.translate(cvs.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(src, 0, 0);
+  return cvs;
+}
+
+// Global luminance equalization helper used in preprocessImage
+function equalizeLuminance(ctx, w, h) {
+  try {
+    var img = ctx.getImageData(0, 0, w, h);
+    var data = img.data;
+    var hist = new Uint32Array(256);
+    for (var i = 0; i < data.length; i += 4) {
+      var y = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      hist[y]++;
+    }
+    var cdf = new Uint32Array(256);
+    var cum = 0;
+    for (var k = 0; k < 256; k++) { cum += hist[k]; cdf[k] = cum; }
+    var total = (w * h);
+    var map = new Uint8Array(256);
+    for (var k = 0; k < 256; k++) map[k] = Math.round((cdf[k] - cdf[0]) / (total - cdf[0]) * 255) || 0;
+
+    for (var i = 0; i < data.length; i += 4) {
+      var r = data[i], g = data[i + 1], b = data[i + 2];
+      var y = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+      var yn = map[y];
+      if (y > 0) {
+        var scale = yn / y;
+        data[i] = Math.max(0, Math.min(255, Math.round(r * scale)));
+        data[i + 1] = Math.max(0, Math.min(255, Math.round(g * scale)));
+        data[i + 2] = Math.max(0, Math.min(255, Math.round(b * scale)));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) { console.warn('equalize failed', e); }
+}
+
+// Align face to canvas based on landmarks and apply simple contrast stretch
+async function preprocessImage(imgEl) {
+  try {
+    // detect landmarks on original image
+    var det = await faceapi.detectSingleFace(imgEl, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 })).withFaceLandmarks();
+    if (!det) return imgEl; // no face found — return original
+
+    var box = det.detection.box;
+    var landmarks = det.landmarks;
+    var leftEye = landmarks.getLeftEye();
+    var rightEye = landmarks.getRightEye();
+
+    // eye centers
+    var lx = (leftEye[0].x + leftEye[3].x) / 2;
+    var ly = (leftEye[0].y + leftEye[3].y) / 2;
+    var rx = (rightEye[0].x + rightEye[3].x) / 2;
+    var ry = (rightEye[0].y + rightEye[3].y) / 2;
+
+    var angle = Math.atan2(ry - ly, rx - lx);
+
+    // create canvas and draw rotated, centered crop
+    var size = Math.max(box.width, box.height) * 1.6; // padding
+    var sx = box.x + box.width / 2 - size / 2;
+    var sy = box.y + box.height / 2 - size / 2;
+
+    var outSize = 160; // target size for embedding model
+    var canvas = document.createElement('canvas');
+    canvas.width = outSize;
+    canvas.height = outSize;
+    var ctx = canvas.getContext('2d');
+
+    // translate to center, rotate, then draw the crop scaled to outSize
+    ctx.translate(outSize / 2, outSize / 2);
+    ctx.rotate(-angle);
+    ctx.drawImage(imgEl, sx, sy, size, size, -outSize / 2, -outSize / 2, outSize, outSize);
+
+    // contrast stretch for better visibility
+    try { contrastStretch(ctx, outSize, outSize); } catch (e) { /* ignore */ }
+
+    return canvas;
+  } catch (e) {
+    console.error('preprocessImage error', e);
+    return imgEl;
+  }
+}
+
+// Simple per-channel contrast stretch (min-max) on canvas
+function contrastStretch(ctx, w, h) {
+  var img = ctx.getImageData(0, 0, w, h);
+  var data = img.data;
+  var min = [255, 255, 255], max = [0, 0, 0];
+  for (var i = 0; i < data.length; i += 4) {
+    for (var c = 0; c < 3; c++) {
+      var v = data[i + c];
+      if (v < min[c]) min[c] = v;
+      if (v > max[c]) max[c] = v;
+    }
+  }
+  for (var i = 0; i < data.length; i += 4) {
+    for (var c = 0; c < 3; c++) {
+      var v = data[i + c];
+      var mn = min[c], mx = max[c];
+      if (mx > mn) data[i + c] = Math.max(0, Math.min(255, Math.round((v - mn) * 255 / (mx - mn))));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// Load b64 into an Image element (needed for faceapi)
+function b64ToImg(b64) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() { resolve(img); };
+    img.src = b64;
+  });
+}
+
+// ── Navigation ───────────────────────────────────────────────────────────────
+function goTo(name) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  document.getElementById('page-' + name).classList.add('active');
+  var idx = { register:0, identify:1, database:2 }[name];
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+  if (name === 'database') renderDB();
+}
+
+// ── Register ─────────────────────────────────────────────────────────────────
+function renderStrip() {
+  var strip = document.getElementById('strip');
+  strip.innerHTML = '';
+  regPhotos.forEach(function(b64, i) {
+    var img = document.createElement('img');
+    img.src = b64;
+    img.title = 'Tap to remove';
+    img.onclick = function() { regPhotos.splice(i, 1); renderStrip(); };
+    strip.appendChild(img);
+  });
+  if (regPhotos.length < 5) {
+    var slot = document.createElement('div');
+    slot.className = 'add-slot';
+    slot.innerHTML = '+<span>ADD PHOTO</span>';
+    slot.onclick = function() { document.getElementById('photo-file').click(); };
+    strip.appendChild(slot);
+  }
+}
+
+function onPhotoFile(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function(ev) { regPhotos.push(ev.target.result); renderStrip(); };
+  r.readAsDataURL(file);
+  e.target.value = '';
+}
+
+async function doRegister() {
+  var name = document.getElementById('r-name').value.trim();
+  var roll = document.getElementById('r-roll').value.trim();
+  if (!name) { alert('Enter a name'); return; }
+  if (!roll) { alert('Enter a roll number'); return; }
+  if (!regPhotos.length) { alert('Add at least one photo'); return; }
+
+  var btn = document.getElementById('reg-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Processing faces...';
+
+  // Extract descriptors from all photos
+  var descriptors = [];
+  for (var i = 0; i < regPhotos.length; i++) {
+    try {
+      var img = await b64ToImg(regPhotos[i]);
+      var desc = await getDescriptor(img);
+      if (desc) descriptors.push(Array.from(desc));
+    } catch(e) { console.error('Photo', i, e); }
+  }
+
+  if (!descriptors.length) {
+    alert('No face detected in any of the photos. Please use clear face photos.');
+    btn.disabled = false;
+    btn.textContent = '✓ Register Person';
+    return;
+  }
+
+  people.push({
+    id: Date.now(),
+    name: name,
+    roll: roll,
+    photos: [regPhotos[0]], // store first photo for thumbnail
+    descriptors: descriptors
+  });
+  save();
+  refreshCount();
+
+  alert('✓ ' + name + ' registered with ' + descriptors.length + ' face sample' + (descriptors.length > 1 ? 's' : '') + '!');
+  clearReg();
+  btn.disabled = false;
+  btn.textContent = '✓ Register Person';
+}
+
+function clearReg() {
+  document.getElementById('r-name').value = '';
+  document.getElementById('r-roll').value = '';
+  regPhotos = [];
+  renderStrip();
+}
+
+// ── Identify ─────────────────────────────────────────────────────────────────
+function onQueryFile(e) {
+  var files = Array.from(e.target.files || []);
+  if (!files.length) return;
+
+  if (identifyMode === 'single') {
+    files = files.slice(0, 1);
+  }
+
+  queryPhotos = [];
+  var loaded = 0;
+
+  files.forEach(function(file, index) {
+    var r = new FileReader();
+    r.onload = function(ev) {
+      queryPhotos[index] = { b64: ev.target.result, name: file.name };
+      loaded++;
+      if (loaded === files.length) {
+        renderQueryPreview();
+      }
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+function clearIdentify() {
+  queryPhotos = [];
+  document.getElementById('uimg').classList.add('hidden');
+  document.getElementById('query-strip').classList.add('hidden');
+  document.getElementById('query-strip').innerHTML = '';
+  document.getElementById('query-count').classList.add('hidden');
+  document.getElementById('query-count').textContent = '';
+  document.getElementById('upholder').classList.remove('hidden');
+  document.getElementById('uzone').classList.remove('filled');
+  document.getElementById('ufile').value = '';
+  document.getElementById('id-btn').disabled = true;
+  document.getElementById('id-result').innerHTML = '';
+  document.getElementById('id-progress').classList.add('hidden');
+}
+
+function renderQueryPreview() {
+  var holder = document.getElementById('upholder');
+  var singleImg = document.getElementById('uimg');
+  var strip = document.getElementById('query-strip');
+  var count = document.getElementById('query-count');
+
+  holder.classList.add('hidden');
+  document.getElementById('uzone').classList.add('filled');
+
+  if (!queryPhotos.length) {
+    clearIdentify();
+    return;
+  }
+
+  document.getElementById('id-btn').disabled = false;
+  document.getElementById('id-result').innerHTML = '';
+  document.getElementById('id-progress').classList.add('hidden');
+
+  if (identifyMode === 'single') {
+    strip.classList.add('hidden');
+    count.classList.add('hidden');
+    singleImg.src = queryPhotos[0].b64;
+    singleImg.classList.remove('hidden');
+    return;
+  }
+
+  singleImg.classList.add('hidden');
+  strip.innerHTML = queryPhotos.map(function(photo) {
+    return '<img class="query-thumb" src="' + photo.b64 + '" alt="Selected photo">';
+  }).join('');
+  strip.classList.remove('hidden');
+  count.innerHTML = '<b>' + queryPhotos.length + '</b> photos selected';
+  count.classList.remove('hidden');
+}
+
+function setIdentifyMode(mode) {
+  identifyMode = mode;
+  document.getElementById('id-mode-single').classList.toggle('active', mode === 'single');
+  document.getElementById('id-mode-multi').classList.toggle('active', mode === 'multi');
+  document.getElementById('ufile').multiple = mode === 'multi';
+  clearIdentify();
+}
+
+function showProgress(msg) {
+  var el = document.getElementById('id-progress');
+  el.innerHTML = '<b>' + msg + '</b>';
+  el.classList.remove('hidden');
+  el.className = 'progress';
+}
+
+async function doIdentify() {
+  if (!queryPhotos.length) return;
+  if (!people.length) { alert('No people registered yet'); return; }
+
+  var btn = document.getElementById('id-btn');
+  btn.disabled = true;
+  document.getElementById('id-result').innerHTML = '';
+  showProgress('Detecting face in ' + queryPhotos.length + ' photo' + (queryPhotos.length > 1 ? 's' : '') + '...');
+
+  var results = [];
+
+  for (var i = 0; i < queryPhotos.length; i++) {
+    showProgress('Detecting face in photo ' + (i + 1) + ' of ' + queryPhotos.length + '...');
+
+    var qImg = await b64ToImg(queryPhotos[i].b64);
+    var qDesc = await getDescriptor(qImg);
+
+    if (!qDesc) {
+      results.push({ status: 'noface', label: 'Photo ' + (i + 1), b64: queryPhotos[i].b64 });
+      continue;
+    }
+
+    showProgress('Comparing photo ' + (i + 1) + ' against ' + people.length + ' registered person' + (people.length > 1 ? 's' : '') + '...');
+
+    var best = null;
+    var bestDist = Infinity;
+    var secondBestDist = Infinity;
+
+    people.forEach(function(person) {
+      // Prefer centroid (average descriptor) for faster, more stable matching
+      if (person.avgDescriptor && person.avgDescriptor.length) {
+        try {
+          var davg = new Float32Array(person.avgDescriptor);
+          var dist = faceapi.euclideanDistance(qDesc, davg);
+          if (dist < bestDist) {
+            secondBestDist = bestDist;
+            bestDist = dist;
+            best = person;
+          } else if (dist < secondBestDist) {
+            secondBestDist = dist;
+          }
+        } catch (e) {
+          // fallback to per-descriptor
+          person.descriptors.forEach(function(dArr) {
+            var d = new Float32Array(dArr);
+            var dist2 = faceapi.euclideanDistance(qDesc, d);
+            if (dist2 < bestDist) { secondBestDist = bestDist; bestDist = dist2; best = person; }
+            else if (dist2 < secondBestDist) { secondBestDist = dist2; }
+          });
+        }
+      } else {
+        person.descriptors.forEach(function(dArr) {
+          var d = new Float32Array(dArr);
+          var dist = faceapi.euclideanDistance(qDesc, d);
+          if (dist < bestDist) { secondBestDist = bestDist; bestDist = dist; best = person; }
+          else if (dist < secondBestDist) { secondBestDist = dist; }
+        });
+      }
+    });
+
+    // Stricter matching: threshold + gap check
+    var isMatch = bestDist <= MATCH_THRESHOLD && (secondBestDist - bestDist) >= MIN_GAP;
+    var similarity = Math.max(0, Math.round((1 - Math.min(bestDist, 0.6) / 0.6) * 100));
+    
+    results.push({
+      status: isMatch ? 'match' : 'nomatch',
+      label: 'Photo ' + (i + 1),
+      b64: queryPhotos[i].b64,
+      best: best,
+      similarity: similarity,
+      bestDist: bestDist,
+      secondBestDist: secondBestDist
+    });
+  }
+
+  document.getElementById('id-progress').classList.add('hidden');
+  document.getElementById('id-result').innerHTML = results.map(function(res) {
+    if (res.status === 'noface') {
+      return '<div class="result nomatch"><div class="ico">⚠️</div><h2>' + res.label + '</h2><p class="rnomatch">No face detected. Use a clearer photo.</p><img class="query-thumb" style="margin-top:10px;width:96px;height:96px;" src="' + res.b64 + '" alt="Query photo"></div>';
+    }
+
+    if (res.status === 'match') {
+      return '<div class="result match"><div class="ico">✅</div><h2>' + res.label + ' MATCH FOUND</h2><div class="rname">' + res.best.name + '</div><div class="rroll">Roll: ' + res.best.roll + '</div><div class="rscore">' + res.similarity + '%<span>face similarity</span></div><p style="font-size:11px;color:#888;margin-top:8px;">Confidence: ' + (res.secondBestDist - res.bestDist).toFixed(3) + ' | Distance: ' + res.bestDist.toFixed(3) + '</p><img class="query-thumb" style="margin-top:10px;width:96px;height:96px;" src="' + res.b64 + '" alt="Query photo"></div>';
+    }
+
+    var reasonText = '';
+    if (res.bestDist > MATCH_THRESHOLD) {
+      reasonText = '<p style="font-size:12px;color:#ff9999;margin-top:6px;">Too distant (distance: ' + res.bestDist.toFixed(3) + ' > ' + MATCH_THRESHOLD.toFixed(2) + ')</p>';
+    } else if ((res.secondBestDist - res.bestDist) < MIN_GAP) {
+      reasonText = '<p style="font-size:12px;color:#ff9999;margin-top:6px;">Too similar to another person (confidence gap: ' + (res.secondBestDist - res.bestDist).toFixed(3) + ' < ' + MIN_GAP.toFixed(2) + ')</p>';
+    }
+    
+    return '<div class="result nomatch"><div class="ico">❌</div><h2>' + res.label + ' NO MATCH</h2><p class="rnomatch">This person is not in the database.</p>' + (res.best ? '<p class="rclosest">Closest: ' + res.best.name + ' (' + res.similarity + '% similar)</p>' : '') + reasonText + '<img class="query-thumb" style="margin-top:10px;width:96px;height:96px;" src="' + res.b64 + '" alt="Query photo"></div>';
+  }).join('');
+
+  btn.disabled = false;
+}
+
+// ── Database ──────────────────────────────────────────────────────────────────
+function renderDB() {
+  var el = document.getElementById('db-list');
+  if (!people.length) {
+    el.innerHTML = '<div class="empty">No people registered yet.<br>Go to the Register tab to add someone.</div>';
+    return;
+  }
+  el.innerHTML = people.map(function(p, i) {
+    var thumb = p.photos && p.photos.length
+      ? '<img src="' + p.photos[0] + '">'
+      : '<div style="width:48px;height:48px;border-radius:7px;background:#222;display:grid;place-items:center;color:#00d4ff;font-size:18px;">' + p.name[0].toUpperCase() + '</div>';
+    return '<div class="person-card">' +
+      thumb +
+      '<div class="pinfo">' +
+        '<div class="pname">' + p.name + '</div>' +
+        '<div class="proll">Roll: ' + p.roll + '</div>' +
+        '<div class="pphotos">' + p.descriptors.length + ' face sample' + (p.descriptors.length > 1 ? 's' : '') + '</div>' +
+      '</div>' +
+      '<button class="del" onclick="delPerson(' + i + ')">Delete</button>' +
+    '</div>';
+  }).join('');
+}
+
+function delPerson(i) {
+  if (!confirm('Delete ' + people[i].name + '?')) return;
+  people.splice(i, 1);
+  save();
+  renderDB();
+  refreshCount();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function save() { try { computeCentroids(); localStorage.setItem('mfn_people', JSON.stringify(people)); } catch(e) {} }
+// Compute average descriptor (centroid) for each person to improve matching
+function computeCentroids() {
+  people.forEach(function(p) {
+    if (!p.descriptors || !p.descriptors.length) { p.avgDescriptor = null; return; }
+    var len = p.descriptors.length;
+    var dim = p.descriptors[0].length;
+    var sum = new Array(dim).fill(0);
+    for (var i = 0; i < len; i++) {
+      var d = p.descriptors[i];
+      for (var j = 0; j < dim; j++) sum[j] += d[j];
+    }
+    for (var k = 0; k < dim; k++) sum[k] = sum[k] / len;
+    p.avgDescriptor = sum; // store as plain array for serialization
+  });
+}
+function refreshCount() { document.getElementById('count').textContent = people.length + ' People'; }
+
+// ── Mode toggle ───────────────────────────────────────────────────────────────
+function setMode(mode) {
+  document.getElementById('single-mode').classList.toggle('hidden', mode !== 'single');
+  document.getElementById('bulk-mode').classList.toggle('hidden', mode !== 'bulk');
+  document.getElementById('mode-single').classList.toggle('active', mode === 'single');
+  document.getElementById('mode-bulk').classList.toggle('active', mode === 'bulk');
+}
+
+// ── Bulk: multi-photo upload ──────────────────────────────────────────────────
+var bulkStudents = []; // {name, roll, photo:b64, status}
+
+function onBulkPhotos(e) {
+  var files = Array.from(e.target.files);
+  if (!files.length) return;
+
+  bulkStudents = [];
+  var loaded = 0;
+
+  files.forEach(function(file, i) {
+    var r = new FileReader();
+    r.onload = function(ev) {
+      // Try to parse name and roll from filename: "Name_Roll.jpg"
+      var fname = file.name.replace(/\.[^.]+$/, ''); // strip extension
+      var parts = fname.split('_');
+      var autoName = parts.length >= 2 ? parts.slice(0, parts.length - 1).join(' ') : fname;
+      var autoRoll = parts.length >= 2 ? parts[parts.length - 1] : '';
+
+      bulkStudents[i] = { name: autoName, roll: autoRoll, photo: ev.target.result, status: 'pending' };
+      loaded++;
+      if (loaded === files.length) {
+        document.getElementById('bulk-zone').classList.add('hidden');
+        document.getElementById('bulk-reg-btn').classList.remove('hidden');
+        document.getElementById('bulk-clear-btn').classList.remove('hidden');
+        renderBulkTable();
+      }
+    };
+    r.readAsDataURL(file);
+  });
+  e.target.value = '';
+}
+
+function renderBulkTable() {
+  var html = '<div class="bulk-summary">📷 <b>' + bulkStudents.length + '</b> photo' + (bulkStudents.length > 1 ? 's' : '') + ' selected</div>';
+
+  bulkStudents.forEach(function(s, i) {
+    var statusHtml = s.status === 'ok'
+      ? '<div class="bulk-status ok">✓ Registered</div>'
+      : s.status === 'error'
+        ? '<div class="bulk-status err">✗ No face detected</div>'
+        : '';
+
+    html +=
+      '<div class="bulk-row ' + (s.status === 'ok' ? 'done' : s.status === 'error' ? 'error' : '') + '">' +
+        '<img class="bulk-thumb" src="' + s.photo + '">' +
+        '<div class="bulk-info">' +
+          '<input type="text" class="bulk-input" placeholder="Full Name" value="' + s.name + '" oninput="bulkStudents[' + i + '].name=this.value">' +
+          '<input type="text" class="bulk-input roll-input" placeholder="Roll No." value="' + s.roll + '" oninput="bulkStudents[' + i + '].roll=this.value">' +
+          statusHtml +
+        '</div>' +
+        (s.status !== 'ok' ? '<button class="bulk-remove" onclick="removeBulk(' + i + ')">✕</button>' : '') +
+      '</div>';
+  });
+
+  document.getElementById('bulk-table').innerHTML = html;
+}
+
+function removeBulk(i) {
+  bulkStudents.splice(i, 1);
+  if (!bulkStudents.length) { clearBulk(); return; }
+  renderBulkTable();
+}
+
+async function doBulkRegister() {
+  var toProcess = bulkStudents.filter(function(s){ return s.status !== 'ok'; });
+  if (!toProcess.length) { alert('All already registered!'); return; }
+
+  // Validate all have name and roll
+  for (var i = 0; i < bulkStudents.length; i++) {
+    if (bulkStudents[i].status === 'ok') continue;
+    if (!bulkStudents[i].name.trim() || !bulkStudents[i].roll.trim()) {
+      alert('Please fill in name and roll number for all students.'); return;
+    }
+  }
+
+  var btn = document.getElementById('bulk-reg-btn');
+  btn.disabled = true;
+  var done = 0, failed = 0;
+
+  for (var j = 0; j < bulkStudents.length; j++) {
+    var s = bulkStudents[j];
+    if (s.status === 'ok') continue;
+
+    btn.textContent = '⏳ ' + (j + 1) + '/' + bulkStudents.length + ' — ' + s.name;
+
+    try {
+      var img = await b64ToImg(s.photo);
+      var desc = await getDescriptor(img);
+      if (desc) {
+        var existing = people.findIndex(function(p){ return p.roll === s.roll.trim(); });
+        if (existing >= 0) {
+          people[existing].descriptors.push(Array.from(desc));
+        } else {
+          people.push({ id: Date.now() + j, name: s.name.trim(), roll: s.roll.trim(), photos: [s.photo], descriptors: [Array.from(desc)] });
+        }
+        bulkStudents[j].status = 'ok';
+        done++;
+      } else {
+        bulkStudents[j].status = 'error';
+        failed++;
+      }
+    } catch(ex) {
+      bulkStudents[j].status = 'error';
+      failed++;
+    }
+    renderBulkTable();
+  }
+
+  save();
+  refreshCount();
+  btn.disabled = false;
+  btn.textContent = '✓ Register All';
+  alert('Done! ✓ ' + done + ' registered' + (failed ? '\n✗ ' + failed + ' failed — no face detected in photo.' : ''));
+}
+
+function clearBulk() {
+  bulkStudents = [];
+  document.getElementById('bulk-table').innerHTML = '';
+  document.getElementById('bulk-zone').classList.remove('hidden');
+  document.getElementById('bulk-photos-input').value = '';
+  document.getElementById('bulk-reg-btn').classList.add('hidden');
+  document.getElementById('bulk-clear-btn').classList.add('hidden');
+}
+
+// ── Bridge to Face Crop Tool (Queue) ─────────────────────────────────────────
+var identifyQueue = [];
+var isProcessingQueue = false;
+
+function checkQueue() {
+  try {
+    identifyQueue = JSON.parse(localStorage.getItem('identify_queue') || '[]');
+    if (identifyQueue.length > 0) {
+      document.getElementById('queue-info').classList.remove('hidden');
+      document.getElementById('queue-count').textContent = identifyQueue.length;
+    } else {
+      document.getElementById('queue-info').classList.add('hidden');
+    }
+  } catch (e) {
+    console.error('Queue check failed', e);
+  }
+}
+
+function clearQueue() {
+  if (confirm('Clear identify queue?')) {
+    localStorage.setItem('identify_queue', '[]');
+    identifyQueue = [];
+    document.getElementById('queue-info').classList.add('hidden');
+    document.getElementById('batch-results').classList.add('hidden');
+  }
+}
+
+async function startBatchIdentify() {
+  if (!people.length) { alert('No people registered yet'); return; }
+  if (!identifyQueue.length) { alert('Queue is empty'); return; }
+  if (isProcessingQueue) { alert('Already processing'); return; }
+
+  isProcessingQueue = true;
+  document.getElementById('batch-results').classList.remove('hidden');
+  document.getElementById('batch-results-list').innerHTML = '';
+  
+  var matched = 0, noMatch = 0;
+  var results = [];
+
+  for (var i = 0; i < identifyQueue.length; i++) {
+    var item = identifyQueue[i];
+    showProgress('Identifying [' + (i + 1) + '/' + identifyQueue.length + ']: ' + item.label);
+
+    try {
+      var qImg = await b64ToImg(item.b64);
+      var qDesc = await getDescriptor(qImg);
+
+      if (!qDesc) {
+        results.push({ status: 'noface', label: item.label, b64: item.b64 });
+        noMatch++;
+        continue;
+      }
+
+      var best = null;
+      var bestDist = Infinity;
+      var secondBestDist = Infinity;
+
+      people.forEach(function(person) {
+        if (person.avgDescriptor && person.avgDescriptor.length) {
+          try {
+            var davg = new Float32Array(person.avgDescriptor);
+            var dist = faceapi.euclideanDistance(qDesc, davg);
+            if (dist < bestDist) {
+              secondBestDist = bestDist;
+              bestDist = dist;
+              best = person;
+            } else if (dist < secondBestDist) {
+              secondBestDist = dist;
+            }
+          } catch (e) {}
+        }
+      });
+
+      var isMatch = bestDist <= MATCH_THRESHOLD && (secondBestDist - bestDist) >= MIN_GAP;
+      var similarity = Math.max(0, Math.round((1 - Math.min(bestDist, 0.6) / 0.6) * 100));
+      
+      if (isMatch) {
+        results.push({ status: 'match', label: item.label, b64: item.b64, best: best, similarity: similarity });
+        matched++;
+      } else {
+        results.push({ status: 'nomatch', label: item.label, b64: item.b64, best: best, similarity: similarity });
+        noMatch++;
+      }
+    } catch (e) {
+      console.error('Batch identify error', e);
+      results.push({ status: 'error', label: item.label, b64: item.b64 });
+      noMatch++;
+    }
+  }
+
+  document.getElementById('id-progress').classList.add('hidden');
+  document.getElementById('batch-total').textContent = identifyQueue.length;
+  document.getElementById('batch-matched').textContent = matched;
+  document.getElementById('batch-no-match').textContent = noMatch;
+
+  var html = results.map(function(res, idx) {
+    if (res.status === 'match') {
+      return '<div class="result match" style="margin-bottom: 12px;"><div class="ico">✅</div><div style="font-size: 12px; font-weight: bold;">' + res.label + '</div><div class="rname">' + res.best.name + '</div><div class="rroll">Roll: ' + res.best.roll + '</div><div style="font-size: 11px; color: #00cc55; margin-top: 4px;">' + res.similarity + '% match</div><img class="query-thumb" style="margin-top: 8px; width: 80px; height: 80px;" src="' + res.b64 + '" alt="Crop"></div>';
+    } else if (res.status === 'error') {
+      return '<div class="result nomatch" style="margin-bottom: 12px;"><div class="ico">⚠️</div><div style="font-size: 12px; font-weight: bold;">' + res.label + '</div><p class="rnomatch">Processing error</p></div>';
+    } else {
+      return '<div class="result nomatch" style="margin-bottom: 12px;"><div class="ico">❌</div><div style="font-size: 12px; font-weight: bold;">' + res.label + '</div><p class="rnomatch">Not in database</p>' + (res.best ? '<p style="font-size: 11px; color: #999;">Closest: ' + res.best.name + '</p>' : '') + '<img class="query-thumb" style="margin-top: 8px; width: 80px; height: 80px;" src="' + res.b64 + '" alt="Crop"></div>';
+    }
+  }).join('');
+
+  document.getElementById('batch-results-list').innerHTML = html;
+  showProgress('✓ Batch identify complete!');
+  
+  // Cleanup
+  isProcessingQueue = false;
+  setTimeout(() => {
+    localStorage.setItem('identify_queue', '[]');
+    checkQueue();
+  }, 2000);
+}
+
+// Start
+window.addEventListener('load', function() {
+  loadModels();
+  checkQueue();
+  setInterval(checkQueue, 1000);
+});
+</script>
+</body>
+</html>
