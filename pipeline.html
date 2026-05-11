@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UniFaceSync Pipeline</title>
+  <link rel="icon" href="data:," />
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <style>
+    :root {
+      --bg-1: #f3f7ff;
+      --bg-2: #e9f5f1;
+      --panel: #ffffff;
+      --ink: #10201a;
+      --muted: #4b5d55;
+      --line: #d6e0dc;
+      --good: #0b7a3d;
+      --bad: #b12222;
+      --accent: #0e6b58;
+      --accent-2: #0e4f9e;
+      --shadow: 0 14px 35px rgba(16, 32, 26, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(1200px 500px at -10% -10%, #dce9ff 0%, transparent 60%),
+        radial-gradient(900px 500px at 110% 10%, #d5efe6 0%, transparent 60%),
+        linear-gradient(135deg, var(--bg-1), var(--bg-2));
+      padding: 20px;
+    }
+
+    .site-nav {
+      max-width: 1100px;
+      margin: 0 auto 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .site-nav a {
+      text-decoration: none;
+      color: #1c4f96;
+      border: 1px solid #9cb7de;
+      background: #f5f9ff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .site-nav a:hover {
+      border-color: #0e4f9e;
+      color: #0e4f9e;
+    }
+
+    .site-nav a.active {
+      background: #0e4f9e;
+      color: #fff;
+      border-color: #0e4f9e;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .head {
+      padding: 18px 20px;
+      background: linear-gradient(90deg, #ffffff, #f6fbff);
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.5rem;
+      letter-spacing: 0.2px;
+    }
+
+    .sub {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .links a {
+      color: var(--accent-2);
+      text-decoration: none;
+      font-weight: 700;
+      border-bottom: 1px dashed var(--accent-2);
+      padding-bottom: 1px;
+    }
+
+    .links a:hover { opacity: 0.85; }
+
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      color: #fff;
+      background: var(--accent);
+    }
+
+    .btn.secondary {
+      background: #355f98;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .drop {
+      border: 2px dashed #aac8bd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f8fffc;
+      color: #2d4c43;
+      font-size: 0.95rem;
+    }
+
+    .kpi {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: #fbfefd;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .chip .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .chip .value {
+      margin-top: 4px;
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    .status {
+      min-height: 22px;
+      font-size: 0.95rem;
+      color: #1f3f35;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .card.ok { border-color: #b7e3c8; background: #f6fff8; }
+    .card.no { border-color: #efc4c4; background: #fff7f7; }
+
+    .thumb {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #d6e0dc;
+      background: #f2f2f2;
+    }
+
+    .small { font-size: 0.82rem; color: var(--muted); }
+    .match { color: var(--good); font-weight: 700; }
+    .nomatch { color: var(--bad); font-weight: 700; }
+
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .head { padding: 14px; }
+      .body { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="index.html">Face Match</a>
+    <a href="facecrop.html">Face Crop</a>
+    <a href="pipeline.html" class="active">Pipeline</a>
+  </nav>
+
+  <div class="wrap">
+    <section class="panel">
+      <div class="head">
+        <h1>Group Photo Pipeline</h1>
+        <p class="sub">Upload group photos once. This page crops faces, stores queue, then identifies each face one-by-one automatically.</p>
+      </div>
+      <div class="body">
+        <div class="row links">
+          <span>Connected tools:</span>
+          <a href="index.html" target="_blank" rel="noopener">Open Identify/Register Page</a>
+          <a href="facecrop.html" target="_blank" rel="noopener">Open Face Crop Tool</a>
+        </div>
+
+        <div class="drop">
+          <label for="groupFiles"><b>Upload group photos:</b></label>
+          <input id="groupFiles" type="file" accept="image/*" multiple />
+        </div>
+
+        <div class="row">
+          <button id="runBtn" class="btn">Run Full Pipeline</button>
+          <button id="clearQueueBtn" class="btn secondary">Clear Queue</button>
+        </div>
+
+        <div id="status" class="status">Loading models...</div>
+
+        <div class="kpi">
+          <div class="chip"><div class="label">Photos</div><div id="kPhotos" class="value">0</div></div>
+          <div class="chip"><div class="label">Faces Cropped</div><div id="kFaces" class="value">0</div></div>
+          <div class="chip"><div class="label">Queue</div><div id="kQueue" class="value">0</div></div>
+          <div class="chip"><div class="label">Matched</div><div id="kMatched" class="value">0</div></div>
+          <div class="chip"><div class="label">No Match</div><div id="kNoMatch" class="value">0</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="head">
+        <h1>Pipeline Results</h1>
+        <p class="sub">Each cropped face is identified sequentially from the queue.</p>
+      </div>
+      <div class="body">
+        <div id="resultGrid" class="grid"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const DETECT_MIN_CONF = 0.4;
+    const MATCH_THRESHOLD = 0.5;
+    const MIN_GAP = 0.08;
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+
+    const runBtn = document.getElementById('runBtn');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
+    const groupFiles = document.getElementById('groupFiles');
+    const resultGrid = document.getElementById('resultGrid');
+
+    const kPhotos = document.getElementById('kPhotos');
+    const kFaces = document.getElementById('kFaces');
+    const kQueue = document.getElementById('kQueue');
+    const kMatched = document.getElementById('kMatched');
+    const kNoMatch = document.getElementById('kNoMatch');
+
+    let modelsReady = false;
+
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+
+    function updateQueueCount() {
+      try {
+        const queue = JSON.parse(localStorage.getItem('identify_queue') || '[]');
+        kQueue.textContent = String(queue.length);
+      } catch (error) {
+        kQueue.textContent = '0';
+      }
+    }
+
+    function readPeopleDb() {
+      try {
+        return JSON.parse(localStorage.getItem('mfn_people') || '[]');
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function avgDescriptors(descriptorList) {
+      if (!descriptorList || !descriptorList.length) {
+        return null;
+      }
+      const len = descriptorList[0].length;
+      const out = new Float32Array(len);
+      for (let i = 0; i < descriptorList.length; i++) {
+        const d = descriptorList[i];
+        for (let j = 0; j < len; j++) out[j] += d[j];
+      }
+      for (let j = 0; j < len; j++) out[j] /= descriptorList.length;
+      return out;
+    }
+
+    function computeCentroid(person) {
+      if (person.avgDescriptor && person.avgDescriptor.length) {
+        return new Float32Array(person.avgDescriptor);
+      }
+      if (!person.descriptors || !person.descriptors.length) {
+        return null;
+      }
+      const list = person.descriptors
+        .filter(d => d && d.length)
+        .map(d => new Float32Array(d));
+      return avgDescriptors(list);
+    }
+
+    function cropWithPadding(image, box, pad = 0.2) {
+      const sx = Math.max(0, Math.floor(box.x - box.width * pad));
+      const sy = Math.max(0, Math.floor(box.y - box.height * pad));
+      const sw = Math.min(image.naturalWidth - sx, Math.floor(box.width * (1 + 2 * pad)));
+      const sh = Math.min(image.naturalHeight - sy, Math.floor(box.height * (1 + 2 * pad)));
+
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, sw);
+      c.height = Math.max(1, sh);
+      const ctx = c.getContext('2d');
+      ctx.drawImage(image, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      return c;
+    }
+
+    function fileToImage(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.onerror = (e) => {
+          URL.revokeObjectURL(url);
+          reject(e);
+        };
+        img.src = url;
+      });
+    }
+
+    function renderCard(item) {
+      const card = document.createElement('div');
+      card.className = 'card ' + (item.matched ? 'ok' : 'no');
+
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = item.b64;
+      img.alt = item.label;
+
+      const title = document.createElement('div');
+      title.textContent = item.label;
+
+      const state = document.createElement('div');
+      state.className = item.matched ? 'match' : 'nomatch';
+      state.textContent = item.matched ? 'MATCH' : 'NO MATCH';
+
+      const extra = document.createElement('div');
+      extra.className = 'small';
+      if (item.matched) {
+        extra.textContent = item.name + ' | Roll: ' + item.roll + ' | Similarity: ' + item.similarity + '%';
+      } else if (item.closest) {
+        extra.textContent = 'Closest: ' + item.closest + ' (' + item.similarity + '%)';
+      } else {
+        extra.textContent = 'No valid descriptor';
+      }
+
+      card.appendChild(img);
+      card.appendChild(title);
+      card.appendChild(state);
+      card.appendChild(extra);
+      resultGrid.appendChild(card);
+    }
+
+    async function loadModels() {
+      setStatus('Loading models...');
+      await Promise.all([
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
+      modelsReady = true;
+      setStatus('Models ready. Upload group photos and run pipeline.');
+    }
+
+    async function runPipeline() {
+      if (!modelsReady) {
+        alert('Models are still loading. Please wait.');
+        return;
+      }
+
+      const files = Array.from(groupFiles.files || []);
+      if (!files.length) {
+        alert('Please upload one or more group photos.');
+        return;
+      }
+
+      const people = readPeopleDb();
+      if (!people.length) {
+        alert('No registered people found. Register in index.html first.');
+        return;
+      }
+
+      runBtn.disabled = true;
+      resultGrid.innerHTML = '';
+      kPhotos.textContent = String(files.length);
+      kFaces.textContent = '0';
+      kMatched.textContent = '0';
+      kNoMatch.textContent = '0';
+
+      try {
+        setStatus('Step 1/3: Detecting and cropping faces from group photos...');
+
+        const queue = [];
+        let faceCount = 0;
+
+        for (let p = 0; p < files.length; p++) {
+          const file = files[p];
+          setStatus('Step 1/3: Scanning photo ' + (p + 1) + '/' + files.length + '...');
+
+          const img = await fileToImage(file);
+          const detections = await faceapi
+            .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: DETECT_MIN_CONF }))
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+          for (let i = 0; i < detections.length; i++) {
+            const d = detections[i];
+            const crop = cropWithPadding(img, d.detection.box, 0.2);
+            const b64 = crop.toDataURL('image/jpeg', 0.92);
+            queue.push({
+              label: file.name + ' | face ' + (i + 1) + '/' + detections.length,
+              b64,
+              descriptor: Array.from(d.descriptor)
+            });
+            faceCount += 1;
+          }
+          kFaces.textContent = String(faceCount);
+        }
+
+        localStorage.setItem('identify_queue', JSON.stringify(queue.map(q => ({ b64: q.b64, label: q.label }))));
+        updateQueueCount();
+
+        setStatus('Step 2/3: Identifying queued faces one-by-one...');
+
+        const centroids = people
+          .map(person => ({
+            person,
+            centroid: computeCentroid(person)
+          }))
+          .filter(x => x.centroid);
+
+        let matched = 0;
+        let noMatch = 0;
+
+        for (let i = 0; i < queue.length; i++) {
+          const item = queue[i];
+          setStatus('Step 2/3: Identifying ' + (i + 1) + '/' + queue.length + '...');
+
+          const qDesc = new Float32Array(item.descriptor);
+          let best = null;
+          let bestDist = Infinity;
+          let secondDist = Infinity;
+
+          for (let c = 0; c < centroids.length; c++) {
+            const target = centroids[c];
+            const dist = faceapi.euclideanDistance(qDesc, target.centroid);
+            if (dist < bestDist) {
+              secondDist = bestDist;
+              bestDist = dist;
+              best = target.person;
+            } else if (dist < secondDist) {
+              secondDist = dist;
+            }
+          }
+
+          const sim = Math.max(0, Math.round((1 - Math.min(bestDist, 0.6) / 0.6) * 100));
+          const matchedNow = !!best && bestDist <= MATCH_THRESHOLD && (secondDist - bestDist) >= MIN_GAP;
+
+          if (matchedNow) {
+            matched += 1;
+            renderCard({
+              matched: true,
+              label: item.label,
+              b64: item.b64,
+              name: best.name || 'Unknown',
+              roll: best.roll || '-',
+              similarity: sim
+            });
+          } else {
+            noMatch += 1;
+            renderCard({
+              matched: false,
+              label: item.label,
+              b64: item.b64,
+              closest: best ? (best.name || 'Unknown') : '',
+              similarity: sim
+            });
+          }
+
+          kMatched.textContent = String(matched);
+          kNoMatch.textContent = String(noMatch);
+        }
+
+        setStatus('Step 3/3: Done. Processed ' + queue.length + ' faces from ' + files.length + ' photos.');
+      } catch (error) {
+        console.error(error);
+        setStatus('Pipeline failed. See console for details.');
+        alert('Pipeline failed: ' + (error.message || error));
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function clearQueue() {
+      localStorage.setItem('identify_queue', '[]');
+      updateQueueCount();
+      setStatus('Queue cleared.');
+    }
+
+    runBtn.addEventListener('click', runPipeline);
+    clearQueueBtn.addEventListener('click', clearQueue);
+
+    loadModels().catch((error) => {
+      console.error(error);
+      setStatus('Model loading failed. Check internet access (CDN model download).');
+    });
+
+    updateQueueCount();
+  </script>
+</body>
+</html>

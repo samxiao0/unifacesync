@@ -98,9 +98,46 @@
     .stat-card .label { font-size: 11px; color: #888; margin-top: 4px; }
 
     .hidden { display: none !important; }
+
+    .site-nav {
+      background: #121228;
+      border-bottom: 1px solid #2d2d4a;
+      padding: 10px 12px;
+      margin: -20px -20px 20px;
+    }
+    .site-nav .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .site-nav a {
+      color: #8fa6ff;
+      text-decoration: none;
+      border: 1px solid #33406b;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .site-nav a:hover { border-color: #00d4ff; color: #00d4ff; }
+    .site-nav a.active {
+      background: #00d4ff;
+      color: #000;
+      border-color: #00d4ff;
+    }
   </style>
 </head>
 <body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="index.html">Face Match</a>
+    <a href="facecrop.html" class="active">Face Crop</a>
+    <a href="pipeline.html">Pipeline</a>
+  </div>
+</nav>
 
 <!-- Loading Screen -->
 <div id="loading-screen">
