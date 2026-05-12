@@ -114,6 +114,24 @@
   }
   input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 20px rgba(0, 212, 255, 0.2); }
 
+  select {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: clamp(10px, 2vw, 14px);
+    color: var(--text); font-size: clamp(13px, 2vw, 16px);
+    outline: none; transition: all 0.2s; cursor: pointer;
+  }
+  select:focus { border-color: var(--accent); box-shadow: 0 0 20px rgba(0, 212, 255, 0.2); }
+  select option { background: var(--surface); color: var(--text); }
+
+  .class-row {
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  .class-row select { flex: 1; }
+  .btn-small {
+    width: auto; padding: clamp(10px, 1.8vw, 12px) clamp(12px, 2vw, 16px);
+    font-size: clamp(12px, 1.5vw, 13px);
+  }
+
   /* Photo strip */
   .strip {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
@@ -398,6 +416,20 @@
       <label>Roll Number</label>
       <input type="text" id="r-roll" placeholder="e.g. CS-001">
 
+      <label>Select or Create Class</label>
+      <div class="class-row">
+        <select id="r-class-select" onchange="updateClassMode()">
+          <option value="">-- Select Existing Class --</option>
+        </select>
+        <button class="btn-small btn-blue" onclick="toggleNewClassForm()" id="new-class-toggle-btn">+ New</button>
+      </div>
+
+      <div id="new-class-form" class="hidden">
+        <label>Class Name</label>
+        <input type="text" id="new-class-name" placeholder="e.g. Computer Science A">
+        <button class="btn btn-grey" onclick="cancelNewClass()" style="margin-top: 8px;">Cancel</button>
+      </div>
+
       <label>Photos (tap + to add, tap photo to remove)</label>
       <div class="strip" id="strip"></div>
       <input type="file" id="photo-file" accept="image/*" class="hidden" onchange="onPhotoFile(event)">
@@ -411,6 +443,20 @@
       <div class="note">
         <b>Select multiple photos at once.</b> Fill in the name &amp; roll for each, then tap Register All.<br>
         <b>Tip:</b> Name your photos as <b>Name_Roll.jpg</b> (e.g. Ahmed_CS001.jpg) to auto-fill the fields.
+      </div>
+
+      <label>Select or Create Class for Bulk</label>
+      <div class="class-row">
+        <select id="bulk-class-select" onchange="updateBulkClassMode()">
+          <option value="">-- Select Existing Class --</option>
+        </select>
+        <button class="btn-small btn-blue" onclick="toggleBulkNewClassForm()" id="bulk-new-class-toggle-btn">+ New</button>
+      </div>
+
+      <div id="bulk-new-class-form" class="hidden">
+        <label>Class Name</label>
+        <input type="text" id="bulk-new-class-name" placeholder="e.g. Computer Science A">
+        <button class="btn btn-grey" onclick="cancelBulkNewClass()" style="margin-top: 8px;">Cancel</button>
       </div>
 
       <div class="upload-zone" id="bulk-zone" onclick="document.getElementById('bulk-photos-input').click()">
@@ -433,6 +479,11 @@
       <button class="mode-btn active" id="id-mode-single" onclick="setIdentifyMode('single')">1 Photo</button>
       <button class="mode-btn" id="id-mode-multi" onclick="setIdentifyMode('multi')">Multiple Photos</button>
     </div>
+
+    <label>Select Class to Search In</label>
+    <select id="id-class-select">
+      <option value="">-- Loading Classes --</option>
+    </select>
 
     <!-- Queue Info -->
     <div id="queue-info" class="note hidden" style="border-left-color: #00cc55; color: #00cc55;">
@@ -492,14 +543,149 @@ var MATCH_THRESHOLD = 0.50; // euclidean distance — lower = stricter (relaxed 
 var MIN_GAP = 0.08; // minimum gap between best and 2nd best to confirm match (relaxed)
 
 // ── State ────────────────────────────────────────────────────────────────────
-var people = []; // { id, name, roll, photos: [b64], descriptors: [[float]] }
+var people = []; // { id, name, roll, class, descriptors: [[float]], avgDescriptor }
 var regPhotos = [];
 var identifyMode = 'single';
 var queryPhotos = []; // [{ b64, name }]
 
-try { people = JSON.parse(localStorage.getItem('mfn_people') || '[]'); } catch(e) {}
+try { 
+  var stored = localStorage.getItem('mfn_people');
+  if (stored) {
+    people = JSON.parse(stored).map(function(person) {
+      return {
+        id: person.id,
+        name: person.name,
+        roll: person.roll,
+        class: person.class,
+        descriptors: person.descriptors || []
+      };
+    });
+    console.log('✓ Loaded', people.length, 'people from localStorage');
+    save();
+  } else {
+    console.log('No stored people data yet');
+  }
+} catch(e) { 
+  console.error('❌ Failed to load people data:', e.message);
+}
 refreshCount();
 computeCentroids();
+
+// ── Class Management ────────────────────────────────────────────────────────────
+var classes = [];
+
+function extractClasses() {
+  var classSet = new Set();
+  var hasUnassigned = false;
+  people.forEach(function(p) {
+    if (p.class) {
+      classSet.add(p.class);
+    } else {
+      hasUnassigned = true;
+    }
+  });
+  if (hasUnassigned) classSet.add('Unassigned');
+  classes = Array.from(classSet).sort();
+  updateClassDropdowns();
+}
+
+function updateClassDropdowns() {
+  // Update register dropdown
+  var regSelect = document.getElementById('r-class-select');
+  var regValue = regSelect.value;
+  regSelect.innerHTML = '<option value="">-- Select Existing Class --</option>';
+  classes.forEach(function(cls) {
+    var opt = document.createElement('option');
+    opt.value = cls;
+    opt.textContent = cls;
+    regSelect.appendChild(opt);
+  });
+  regSelect.value = regValue;
+
+  // Update identify dropdown
+  var idSelect = document.getElementById('id-class-select');
+  var idValue = idSelect.value;
+  idSelect.innerHTML = '';
+  classes.forEach(function(cls) {
+    var opt = document.createElement('option');
+    opt.value = cls;
+    opt.textContent = cls;
+    idSelect.appendChild(opt);
+  });
+  if (classes.length > 0) {
+    idSelect.value = idValue || classes[0];
+  }
+}
+
+function updateClassMode() {
+  var sel = document.getElementById('r-class-select').value;
+  if (sel) {
+    document.getElementById('new-class-form').classList.add('hidden');
+    document.getElementById('new-class-name').value = '';
+  }
+}
+
+function toggleNewClassForm() {
+  var form = document.getElementById('new-class-form');
+  form.classList.toggle('hidden');
+  if (!form.classList.contains('hidden')) {
+    document.getElementById('r-class-select').value = '';
+    document.getElementById('new-class-name').focus();
+  }
+}
+
+function cancelNewClass() {
+  document.getElementById('new-class-form').classList.add('hidden');
+  document.getElementById('new-class-name').value = '';
+}
+
+function getSelectClass() {
+  var form = document.getElementById('new-class-form');
+  if (!form.classList.contains('hidden')) {
+    var newClass = document.getElementById('new-class-name').value.trim();
+    if (!newClass) { alert('Enter a class name'); return null; }
+    return newClass;
+  } else {
+    var existing = document.getElementById('r-class-select').value;
+    if (!existing) { alert('Select or create a class'); return null; }
+    return existing;
+  }
+}
+
+function updateBulkClassMode() {
+  var sel = document.getElementById('bulk-class-select').value;
+  if (sel) {
+    document.getElementById('bulk-new-class-form').classList.add('hidden');
+    document.getElementById('bulk-new-class-name').value = '';
+  }
+}
+
+function toggleBulkNewClassForm() {
+  var form = document.getElementById('bulk-new-class-form');
+  form.classList.toggle('hidden');
+  if (!form.classList.contains('hidden')) {
+    document.getElementById('bulk-class-select').value = '';
+    document.getElementById('bulk-new-class-name').focus();
+  }
+}
+
+function cancelBulkNewClass() {
+  document.getElementById('bulk-new-class-form').classList.add('hidden');
+  document.getElementById('bulk-new-class-name').value = '';
+}
+
+function getSelectedBulkClass() {
+  var form = document.getElementById('bulk-new-class-form');
+  if (!form.classList.contains('hidden')) {
+    var newClass = document.getElementById('bulk-new-class-name').value.trim();
+    if (!newClass) { alert('Enter a class name'); return null; }
+    return newClass;
+  } else {
+    var existing = document.getElementById('bulk-class-select').value;
+    if (!existing) { alert('Select or create a class for bulk upload'); return null; }
+    return existing;
+  }
+}
 
 // ── Load Models ──────────────────────────────────────────────────────────────
 async function loadModels() {
@@ -514,6 +700,7 @@ async function loadModels() {
     await new Promise(function(r){ setTimeout(r, 400); });
     document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+    extractClasses();
     renderStrip();
   } catch(e) {
     setLoadText('');
@@ -787,14 +974,22 @@ async function doRegister() {
     return;
   }
 
+  var selectedClass = getSelectClass();
+  if (!selectedClass) {
+    btn.disabled = false;
+    btn.textContent = '✓ Register Person';
+    return;
+  }
+
   people.push({
     id: Date.now(),
     name: name,
     roll: roll,
-    photos: [regPhotos[0]], // store first photo for thumbnail
+    class: selectedClass,
     descriptors: descriptors
   });
   save();
+  extractClasses();
   refreshCount();
 
   alert('✓ ' + name + ' registered with ' + descriptors.length + ' face sample' + (descriptors.length > 1 ? 's' : '') + '!');
@@ -806,6 +1001,9 @@ async function doRegister() {
 function clearReg() {
   document.getElementById('r-name').value = '';
   document.getElementById('r-roll').value = '';
+  document.getElementById('r-class-select').value = '';
+  document.getElementById('new-class-form').classList.add('hidden');
+  document.getElementById('new-class-name').value = '';
   regPhotos = [];
   renderStrip();
 }
@@ -902,7 +1100,18 @@ function showProgress(msg) {
 
 async function doIdentify() {
   if (!queryPhotos.length) return;
-  if (!people.length) { alert('No people registered yet'); return; }
+  
+  var selectedClass = document.getElementById('id-class-select').value;
+  if (!selectedClass) { alert('Select a class to search in'); return; }
+
+  var filteredPeople = people.filter(function(p) {
+    if (selectedClass === 'Unassigned') {
+      return !p.class;
+    } else {
+      return p.class === selectedClass;
+    }
+  });
+  if (!filteredPeople.length) { alert('No people registered in the selected class'); return; }
 
   var btn = document.getElementById('id-btn');
   btn.disabled = true;
@@ -922,13 +1131,13 @@ async function doIdentify() {
       continue;
     }
 
-    showProgress('Comparing photo ' + (i + 1) + ' against ' + people.length + ' registered person' + (people.length > 1 ? 's' : '') + '...');
+    showProgress('Comparing photo ' + (i + 1) + ' against ' + filteredPeople.length + ' person' + (filteredPeople.length > 1 ? 's' : '') + ' in class...');
 
     var best = null;
     var bestDist = Infinity;
     var secondBestDist = Infinity;
 
-    people.forEach(function(person) {
+    filteredPeople.forEach(function(person) {
       // Prefer centroid (average descriptor) for faster, more stable matching
       if (person.avgDescriptor && person.avgDescriptor.length) {
         try {
@@ -1006,14 +1215,14 @@ function renderDB() {
     return;
   }
   el.innerHTML = people.map(function(p, i) {
-    var thumb = p.photos && p.photos.length
-      ? '<img src="' + p.photos[0] + '">'
-      : '<div style="width:48px;height:48px;border-radius:7px;background:#222;display:grid;place-items:center;color:#00d4ff;font-size:18px;">' + p.name[0].toUpperCase() + '</div>';
+    var initial = (p.name && p.name[0]) ? p.name[0].toUpperCase() : '?';
+    var thumb = '<div style="width:48px;height:48px;border-radius:7px;background:#222;display:grid;place-items:center;color:#00d4ff;font-size:18px;">' + initial + '</div>';
     return '<div class="person-card">' +
       thumb +
       '<div class="pinfo">' +
         '<div class="pname">' + p.name + '</div>' +
         '<div class="proll">Roll: ' + p.roll + '</div>' +
+        '<div class="proll">Class: ' + (p.class || 'Unassigned') + '</div>' +
         '<div class="pphotos">' + p.descriptors.length + ' face sample' + (p.descriptors.length > 1 ? 's' : '') + '</div>' +
       '</div>' +
       '<button class="del" onclick="delPerson(' + i + ')">Delete</button>' +
@@ -1025,12 +1234,23 @@ function delPerson(i) {
   if (!confirm('Delete ' + people[i].name + '?')) return;
   people.splice(i, 1);
   save();
+  extractClasses();
   renderDB();
   refreshCount();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function save() { try { computeCentroids(); localStorage.setItem('mfn_people', JSON.stringify(people)); } catch(e) {} }
+function save() { 
+  try { 
+    computeCentroids(); 
+    var json = JSON.stringify(people);
+    localStorage.setItem('mfn_people', json);
+    console.log('✓ Data saved successfully. People count:', people.length);
+  } catch(e) { 
+    console.error('❌ Save failed:', e.message);
+    alert('Error saving data: ' + e.message);
+  } 
+}
 // Compute average descriptor (centroid) for each person to improve matching
 function computeCentroids() {
   people.forEach(function(p) {
@@ -1132,6 +1352,9 @@ async function doBulkRegister() {
     }
   }
 
+  var selectedClass = getSelectedBulkClass();
+  if (!selectedClass) return;
+
   var btn = document.getElementById('bulk-reg-btn');
   btn.disabled = true;
   var done = 0, failed = 0;
@@ -1150,7 +1373,7 @@ async function doBulkRegister() {
         if (existing >= 0) {
           people[existing].descriptors.push(Array.from(desc));
         } else {
-          people.push({ id: Date.now() + j, name: s.name.trim(), roll: s.roll.trim(), photos: [s.photo], descriptors: [Array.from(desc)] });
+          people.push({ id: Date.now() + j, name: s.name.trim(), roll: s.roll.trim(), class: selectedClass, descriptors: [Array.from(desc)] });
         }
         bulkStudents[j].status = 'ok';
         done++;
@@ -1166,6 +1389,7 @@ async function doBulkRegister() {
   }
 
   save();
+  extractClasses();
   refreshCount();
   btn.disabled = false;
   btn.textContent = '✓ Register All';
@@ -1177,6 +1401,9 @@ function clearBulk() {
   document.getElementById('bulk-table').innerHTML = '';
   document.getElementById('bulk-zone').classList.remove('hidden');
   document.getElementById('bulk-photos-input').value = '';
+  document.getElementById('bulk-class-select').value = '';
+  document.getElementById('bulk-new-class-form').classList.add('hidden');
+  document.getElementById('bulk-new-class-name').value = '';
   document.getElementById('bulk-reg-btn').classList.add('hidden');
   document.getElementById('bulk-clear-btn').classList.add('hidden');
 }
@@ -1209,7 +1436,12 @@ function clearQueue() {
 }
 
 async function startBatchIdentify() {
-  if (!people.length) { alert('No people registered yet'); return; }
+  var selectedClass = document.getElementById('id-class-select').value;
+  if (!selectedClass) { alert('Select a class to search in'); return; }
+  
+  var filteredPeople = people.filter(function(p) { return p.class === selectedClass; });
+  if (!filteredPeople.length) { alert('No people registered in the selected class'); return; }
+  
   if (!identifyQueue.length) { alert('Queue is empty'); return; }
   if (isProcessingQueue) { alert('Already processing'); return; }
 
@@ -1238,7 +1470,7 @@ async function startBatchIdentify() {
       var bestDist = Infinity;
       var secondBestDist = Infinity;
 
-      people.forEach(function(person) {
+      filteredPeople.forEach(function(person) {
         if (person.avgDescriptor && person.avgDescriptor.length) {
           try {
             var davg = new Float32Array(person.avgDescriptor);

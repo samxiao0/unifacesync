@@ -172,6 +172,15 @@
 
     .drop input[type="file"] { width: 100%; padding: clamp(8px, 1.5vw, 12px); border-radius: calc(var(--radius) - 4px); border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); }
 
+    select {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: clamp(10px, 1.8vw, 12px);
+      color: var(--text-primary); font-size: clamp(12px, 1.8vw, 14px);
+      outline: none; transition: all 0.2s; cursor: pointer; font-weight: 600;
+    }
+    select:focus { border-color: var(--accent); box-shadow: 0 0 20px rgba(0, 212, 255, 0.2); }
+    select option { background: var(--surface); color: var(--text-primary); }
+
     .kpi {
       display: grid;
       gap: clamp(12px, 2vw, 16px);
@@ -321,6 +330,14 @@
           <input id="groupFiles" type="file" accept="image/*" multiple />
         </div>
 
+        <div>
+          <label for="pipelineClass" style="display: block; margin-bottom: 8px; font-weight: 600;"><b>Identify into Class:</b></label>
+          <select id="pipelineClass">
+            <option value="">-- Loading Classes --</option>
+          </select>
+          <div style="font-size: clamp(10px, 1.3vw, 12px); color: var(--text-muted); margin-top: 6px;">Identified faces will be compared only against this class</div>
+        </div>
+
         <div class="row">
           <button id="runBtn" class="btn">Run Full Pipeline</button>
           <button id="clearQueueBtn" class="btn secondary">Clear Queue</button>
@@ -386,6 +403,41 @@
         return JSON.parse(localStorage.getItem('mfn_people') || '[]');
       } catch (error) {
         return [];
+      }
+    }
+
+    function updateClassDropdown() {
+      const people = readPeopleDb();
+      const classSet = new Set();
+      
+      people.forEach(p => {
+        // Check if person has a class, if not use "Unassigned"
+        const cls = p.class || 'Unassigned';
+        classSet.add(cls);
+      });
+      
+      const classes = Array.from(classSet).sort();
+      
+      const sel = document.getElementById('pipelineClass');
+      if (!sel) return; // safety check
+      
+      sel.innerHTML = '';
+      
+      if (classes.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '-- No people registered yet --';
+        opt.disabled = true;
+        opt.selected = true;
+        sel.appendChild(opt);
+      } else {
+        classes.forEach(cls => {
+          const opt = document.createElement('option');
+          opt.value = cls;
+          opt.textContent = cls;
+          sel.appendChild(opt);
+        });
+        sel.value = classes[0];
       }
     }
 
@@ -487,12 +539,32 @@
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
       ]);
       modelsReady = true;
-      setStatus('Models ready. Upload group photos and run pipeline.');
+      updateClassDropdown();
+      
+      const people = readPeopleDb();
+      const classSet = new Set();
+      people.forEach(p => {
+        const cls = p.class || 'Unassigned';
+        classSet.add(cls);
+      });
+      const classes = Array.from(classSet);
+      
+      if (classes.length === 0) {
+        setStatus('⚠️ Models ready, but no people registered yet. Go to index.html to register people.');
+      } else {
+        setStatus('Models ready ✓ - ' + classes.length + ' class(es) found. Select a class, upload group photos, and run pipeline.');
+      }
     }
 
     async function runPipeline() {
       if (!modelsReady) {
         alert('Models are still loading. Please wait.');
+        return;
+      }
+
+      const selectedClass = document.getElementById('pipelineClass').value;
+      if (!selectedClass) {
+        alert('Please select a class to identify into. If no classes appear in dropdown, register people in index.html with class assignments first.');
         return;
       }
 
@@ -502,9 +574,20 @@
         return;
       }
 
-      const people = readPeopleDb();
-      if (!people.length) {
+      const allPeople = readPeopleDb();
+      if (!allPeople.length) {
         alert('No registered people found. Register in index.html first.');
+        return;
+      }
+
+      // Filter by class: handle both explicit class and "Unassigned" for people without class
+      const people = allPeople.filter(p => {
+        const personClass = p.class || 'Unassigned';
+        return personClass === selectedClass;
+      });
+      
+      if (!people.length) {
+        alert('No people registered in the selected class "' + selectedClass + '".\n\nMake sure people are registered with this class in index.html.');
         return;
       }
 
@@ -633,7 +716,29 @@
       setStatus('Model loading failed. Check internet access (CDN model download).');
     });
 
+    updateClassDropdown();
     updateQueueCount();
+
+    // Listen for changes in localStorage from other tabs/windows
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'mfn_people') {
+        updateClassDropdown();
+      }
+    });
+
+    // Refresh class dropdown when page comes into focus
+    window.addEventListener('focus', () => {
+      updateClassDropdown();
+      updateQueueCount();
+    });
+
+    // Refresh class dropdown when switching tabs (visibility change)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        updateClassDropdown();
+        updateQueueCount();
+      }
+    });
   </script>
 </body>
 </html>
